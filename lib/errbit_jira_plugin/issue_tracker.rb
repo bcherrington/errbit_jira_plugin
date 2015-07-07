@@ -6,33 +6,33 @@ module ErrbitJiraPlugin
 
     NOTE = 'Please configure Jira by entering the information below.'
 
-    FIELDS = [
-        [:base_url, {
+    FIELDS = {
+        base_url: {
             :label => 'Jira URL without trailing slash',
             :placeholder => 'https://jira.example.org'
-        }],
-        [:context_path, {
+        },
+        context_path: {
             :optional => true,
             :label => 'Context Path (Just "/" if empty otherwise with leading slash)',
             :placeholder => "/jira"
-        }],
-        [:username, {
+        },
+        username: {
             :label => 'Username',
             :placeholder => 'johndoe'
-        }],
-        [:password, {
+        },
+        password: {
             :label => 'Password',
             :placeholder => 'p@assW0rd'
-        }],
-        [:project_id, {
+        },
+        project_id: {
             :label => 'Project Key',
             :placeholder => 'The project Key where the issue will be created'
-        }],
-        [:issue_priority, {
+        },
+        issue_priority: {
             :label => 'Priority',
             :placeholder => 'Normal'
-        }]
-    ]
+        }
+    }
 
     def self.label
       LABEL
@@ -54,13 +54,26 @@ module ErrbitJiraPlugin
       ))
     end
 
+
+  # Icons to display during user interactions with this issue tracker. This
+  # method should return a hash of two-tuples, the key names being 'create',
+  # 'goto', and 'inactive'. The two-tuples should contain the icon media type
+  # and the binary icon data.
+  def self.icons
+    @icons ||= {
+      create: [ 'image/png', File.read('app/assets/images/jira_create.png') ],
+      goto: [ 'image/png', File.read('app/assets/images/jira_goto.png') ],
+      inactive: [ 'image/png', File.read('app/assets/images/jira_inactive.png') ],
+    }
+  end
+
     def configured?
-      params['project_id'].present?
+      options['project_id'].present?
     end
 
     def errors
       errors = []
-      if self.class.fields.detect {|f| params[f[0]].blank? && !f[1][:optional]}
+      if self.class.fields.detect {|f| options[f[0]].blank? && !f[1][:optional]}
         errors << [:base, 'You must specify all non optional values!']
       end
       errors
@@ -71,45 +84,41 @@ module ErrbitJiraPlugin
     end
 
     def client
-      options = {
-        :username => params['username'],
-        :password => params['password'],
-        :site => params['base_url'],
+      opts = {
+        :username => options['username'],
+        :password => options['password'],
+        :site => options['base_url'],
         :auth_type => :basic,
-        :context_path => (params['context_path'] == '/') ? params['context_path'] = '' : params['context_path']
+	:use_ssl => false,
+        :context_path => (options['context_path'] == '/') ? options['context_path'] = '' : options['context_path']
       }
-      JIRA::Client.new(options)
+      JIRA::Client.new(opts)
     end
 
-    def create_issue(problem, reported_by = nil)
+    def create_issue(title, body, user: {})
       begin
-        issue_title =  "[#{ problem.environment }][#{ problem.where }] #{problem.message.to_s.truncate(100)}".delete!("\n")
-        issue_description = self.class.body_template.result(binding).unpack('C*').pack('U*')
-        issue = {"fields"=>{"summary"=>issue_title, "description"=>issue_description,"project"=>{"key"=>params['project_id']},"issuetype"=>{"id"=>"3"},"priority"=>{"name"=>params['issue_priority']}}}
+puts title
+puts body
+        issue = {"fields"=>{"summary"=>title, "description"=>body, "project"=>{"key"=>options['project_id']},"issuetype"=>{"name"=>"Bug"},"priority"=>{"name"=>options['issue_priority']}}}
         
         issue_build = client.Issue.build
         issue_build.save(issue)
-        
-        problem.update_attributes(
-          :issue_link => jira_url(issue_build.key),
-          :issue_type => params['issue_type']
-        )
-
+        jira_url(issue_build.key)
       rescue JIRA::HTTPError
         raise ErrbitJiraPlugin::IssueError, "Could not create an issue with Jira.  Please check your credentials."
       end
     end
 
-    def jira_url(project_id)
-      "#{params['base_url']}#{ctx_path}browse/#{project_id}"
+    def jira_url(key)
+      "#{options['base_url']}#{ctx_path}/browse/#{key}"
     end
 
     def ctx_path
-      (params['context_path'] == '') ? '/' : params['context_path']
+      (options['context_path'] == '') ? '/' : options['context_path']
     end
 
     def url
-      params['base_url']
+      options['base_url']
     end
   end
 end
